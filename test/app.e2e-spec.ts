@@ -102,15 +102,15 @@ describe('Enterprise Service API (e2e)', () => {
       return request(app.getHttpServer())
         .post('/auth/login')
         .send({
-          email: 'admin@test.com',
-          password: 'Test123!',
+          email: testAdmin.email,
+          password: testAdmin.password,
         })
         .expect(200)
         .expect((res) => {
-          expect(res.body.data).toHaveProperty('access_token');
-          authToken = res.body.data.access_token;
+          expect(res.body).toHaveProperty('access_token');
+          authToken = res.body.access_token;
           console.log(authToken);
-
+          
         });
     });
 
