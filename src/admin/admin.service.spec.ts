@@ -2,6 +2,7 @@ import { ConflictException, NotFoundException } from '@nestjs/common';
 import { Test, TestingModule } from '@nestjs/testing';
 import { getRepositoryToken } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
+import { AuthService } from '../auth/auth.service';
 import { AdminService } from './admin.service';
 import { CreateAdminDto } from './dto/create-admin.dto';
 import { UpdateAdminDto } from './dto/update-admin.dto';
@@ -10,6 +11,7 @@ import { Admin } from './entities/admin.entity';
 describe('AdminService', () => {
   let service: AdminService;
   let repository: Repository<Admin>;
+  let authService: AuthService;
 
   // Mock data
   const mockAdmin: Admin = {
@@ -17,7 +19,7 @@ describe('AdminService', () => {
     email: 'test@example.com',
     first_name: 'John',
     last_name: 'Doe',
-    password_hash: 'hashedpassword123',
+    password_hash: 'hashedpassword123', // Cambiado de password_hash a password
     created_at: new Date(),
     updated_at: new Date(),
     fullName: 'John Doe'
@@ -27,7 +29,7 @@ describe('AdminService', () => {
     email: 'new@example.com',
     first_name: 'Jane',
     last_name: 'Smith',
-    password_hash: 'password123'
+    password_hash: 'password123' // Cambiado de password_hash a password
   };
 
   const mockUpdateAdminDto: UpdateAdminDto = {
@@ -44,6 +46,11 @@ describe('AdminService', () => {
     remove: jest.fn(),
   };
 
+  // Mock AuthService
+  const mockAuthService = {
+    hashPassword: jest.fn((password: string) => Promise.resolve(`hashed-${password}`)),
+  };
+
   beforeEach(async () => {
     const module: TestingModule = await Test.createTestingModule({
       providers: [
@@ -52,11 +59,16 @@ describe('AdminService', () => {
           provide: getRepositoryToken(Admin),
           useValue: mockRepository,
         },
+        {
+          provide: AuthService,
+          useValue: mockAuthService,
+        },
       ],
     }).compile();
 
     service = module.get<AdminService>(AdminService);
     repository = module.get<Repository<Admin>>(getRepositoryToken(Admin));
+    authService = module.get<AuthService>(AuthService);
   });
 
   afterEach(() => {
@@ -66,19 +78,31 @@ describe('AdminService', () => {
   describe('create', () => {
     it('should create a new admin successfully', async () => {
       // Arrange
+      const hashedPassword = 'hashed-password123';
       mockRepository.findOne.mockResolvedValueOnce(null);
-      mockRepository.create.mockReturnValue(mockAdmin);
-      mockRepository.save.mockResolvedValue(mockAdmin);
+      mockAuthService.hashPassword.mockResolvedValueOnce(hashedPassword);
+
+      const expectedAdmin = {
+        ...mockAdmin,
+        password_hash: hashedPassword,
+      };
+
+      mockRepository.create.mockReturnValue(expectedAdmin);
+      mockRepository.save.mockResolvedValue(expectedAdmin);
 
       // Act
       const result = await service.create(mockCreateAdminDto);
 
       // Assert
-      expect(result).toEqual(mockAdmin);
+      expect(result).toEqual(expectedAdmin);
+      expect(mockAuthService.hashPassword).toHaveBeenCalledWith(mockCreateAdminDto.password_hash);
       expect(mockRepository.findOne).toHaveBeenCalledWith({
         where: { email: mockCreateAdminDto.email }
       });
-      expect(mockRepository.create).toHaveBeenCalledWith(mockCreateAdminDto);
+      expect(mockRepository.create).toHaveBeenCalledWith({
+        ...mockCreateAdminDto,
+        password_hash: hashedPassword,
+      });
       expect(mockRepository.save).toHaveBeenCalled();
     });
 
@@ -92,6 +116,8 @@ describe('AdminService', () => {
         .toThrow(ConflictException);
     });
   });
+
+  // El resto de las pruebas permanecen igual, ya que no involucran el hasheo de contraseñas
 
   describe('findAll', () => {
     it('should return an array of admins', async () => {
@@ -190,8 +216,8 @@ describe('AdminService', () => {
       // Arrange
       const updateDtoWithEmail = { ...mockUpdateAdminDto, email: 'existing@email.com' };
       mockRepository.findOne
-        .mockResolvedValueOnce(mockAdmin) // First call for findOne
-        .mockResolvedValueOnce({ ...mockAdmin, email: 'existing@email.com' }); // Second call for findByEmail
+        .mockResolvedValueOnce(mockAdmin)
+        .mockResolvedValueOnce({ ...mockAdmin, email: 'existing@email.com' });
 
       // Act & Assert
       await expect(service.update(mockAdmin.admin_id, updateDtoWithEmail))

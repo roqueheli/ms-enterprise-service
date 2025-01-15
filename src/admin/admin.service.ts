@@ -1,6 +1,7 @@
 import { ConflictException, Injectable, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
+import { AuthService } from '../auth/auth.service';
 import { CreateAdminDto } from './dto/create-admin.dto';
 import { UpdateAdminDto } from './dto/update-admin.dto';
 import { Admin } from './entities/admin.entity';
@@ -13,6 +14,7 @@ export class AdminService {
     constructor(
         @InjectRepository(Admin)
         private readonly adminRepository: Repository<Admin>,
+        private readonly authService: AuthService,
     ) { }
 
     /**
@@ -27,7 +29,15 @@ export class AdminService {
             throw new ConflictException('El email ya está registrado');
         }
 
-        const admin = this.adminRepository.create(createAdminDto);
+        // Hashear el password antes de crear el admin
+        const hashedPassword = await this.authService.hashPassword(createAdminDto.password_hash);
+
+        // Crear el admin con el password hasheado
+        const admin = this.adminRepository.create({
+            ...createAdminDto,
+            password_hash: hashedPassword,
+        });
+
         return this.adminRepository.save(admin);
     }
 

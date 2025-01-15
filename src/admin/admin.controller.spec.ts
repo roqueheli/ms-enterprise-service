@@ -3,10 +3,10 @@ import { Test, TestingModule } from '@nestjs/testing';
 import 'reflect-metadata';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { AdminController } from './admin.controller';
-import { AdminService } from './admin.service';
 import { CreateAdminDto } from './dto/create-admin.dto';
 import { UpdateAdminDto } from './dto/update-admin.dto';
 import { Admin } from './entities/admin.entity';
+import { AdminService } from './admin.service';
 
 describe('AdminController', () => {
   let controller: AdminController;
