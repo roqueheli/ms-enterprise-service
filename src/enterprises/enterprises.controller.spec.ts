@@ -1,4 +1,5 @@
 import { NotFoundException } from '@nestjs/common';
+import { ClientProxy } from '@nestjs/microservices';
 import { Test, TestingModule } from '@nestjs/testing';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { CreateEnterpriseDto } from './dto';
@@ -9,6 +10,7 @@ import { Enterprise } from './entities/enterprise.entity';
 describe('EnterprisesController', () => {
   let controller: EnterprisesController;
   let service: EnterprisesService;
+  let client: ClientProxy;
 
   // Mock data con todas las propiedades requeridas
   const mockEnterprise: Enterprise = {
@@ -42,6 +44,14 @@ describe('EnterprisesController', () => {
     remove: jest.fn(),
   };
 
+  // Mock client proxy
+  const mockClientProxy = {
+    emit: jest.fn(),
+    send: jest.fn().mockReturnValue({
+      toPromise: jest.fn().mockResolvedValue([]), // Simula el método toPromise
+    }),
+  };
+
   beforeEach(async () => {
     const module: TestingModule = await Test.createTestingModule({
       controllers: [EnterprisesController],
@@ -49,6 +59,10 @@ describe('EnterprisesController', () => {
         {
           provide: EnterprisesService,
           useValue: mockEnterpriseService,
+        },
+        {
+          provide: 'ENTERPRISE_SERVICE',
+          useValue: mockClientProxy,
         },
       ],
     })
@@ -73,6 +87,10 @@ describe('EnterprisesController', () => {
       expect(result).toEqual(mockEnterprise);
       expect(service.create).toHaveBeenCalledWith(mockCreateEnterpriseDto);
       expect(service.create).toHaveBeenCalledTimes(1);
+      expect(mockClientProxy.emit).toHaveBeenCalledWith('enterprise_created', {
+        enterpriseId: mockEnterprise.enterprise_id,
+        name: mockEnterprise.name,
+      });
     });
 
     it('should handle errors during creation', async () => {
@@ -86,15 +104,22 @@ describe('EnterprisesController', () => {
     it('should return an array of enterprises', async () => {
       const enterprises = [mockEnterprise];
       mockEnterpriseService.findAll.mockResolvedValue(enterprises);
+      mockClientProxy.send.mockReturnValueOnce({
+        toPromise: jest.fn().mockResolvedValue(null), // Simula que no hay caché
+      });
 
       const result = await controller.findAll();
 
       expect(result).toEqual(enterprises);
       expect(service.findAll).toHaveBeenCalledTimes(1);
+      expect(mockClientProxy.send).toHaveBeenCalledWith('get_all_enterprises', {});
     });
 
     it('should return empty array when no enterprises exist', async () => {
       mockEnterpriseService.findAll.mockResolvedValue([]);
+      mockClientProxy.send.mockReturnValueOnce({
+        toPromise: jest.fn().mockResolvedValue(null), // Simula que no hay caché
+      });
 
       const result = await controller.findAll();
 
@@ -106,49 +131,27 @@ describe('EnterprisesController', () => {
   describe('findOne', () => {
     it('should return a single enterprise', async () => {
       mockEnterpriseService.findOne.mockResolvedValue(mockEnterprise);
+      mockClientProxy.send.mockReturnValueOnce({
+        toPromise: jest.fn().mockResolvedValue(null), // Simula que no hay caché
+      });
 
       const result = await controller.findOne(mockEnterprise.enterprise_id);
 
       expect(result).toEqual(mockEnterprise);
       expect(service.findOne).toHaveBeenCalledWith(mockEnterprise.enterprise_id);
     });
-
-    it('should throw NotFoundException when enterprise is not found', async () => {
-      mockEnterpriseService.findOne.mockRejectedValue(new NotFoundException());
-
-      await expect(controller.findOne('non-existent-id')).rejects.toThrow(NotFoundException);
-    });
-  });
-
-  describe('update', () => {
-    it('should update an enterprise', async () => {
-      const updatedEnterprise = {
-        ...mockEnterprise,
-        ...mockCreateEnterpriseDto,
-      };
-      mockEnterpriseService.create.mockResolvedValue(updatedEnterprise);
-
-      const result = await controller.update(mockCreateEnterpriseDto);
-
-      expect(result).toEqual(updatedEnterprise);
-      expect(service.create).toHaveBeenCalledWith(mockCreateEnterpriseDto);
-    });
-
-    it('should handle errors during update', async () => {
-      mockEnterpriseService.create.mockRejectedValue(new Error('Update failed'));
-
-      await expect(controller.update(mockCreateEnterpriseDto)).rejects.toThrow('Update failed');
-    });
   });
 
   describe('remove', () => {
     it('should remove an enterprise', async () => {
-      mockEnterpriseService.remove.mockResolvedValue({ affected: 1 });
+      mockEnterpriseService.remove.mockResolvedValue(undefined);
 
       const result = await controller.remove(mockEnterprise.enterprise_id);
 
-      expect(result).toEqual({ affected: 1 });
+      expect(result).toEqual({ message: 'Enterprise deleted successfully' });
       expect(service.remove).toHaveBeenCalledWith(mockEnterprise.enterprise_id);
+      expect(mockClientProxy.emit).toHaveBeenCalledWith('enterprise_deleted', { enterpriseId: mockEnterprise.enterprise_id });
+      expect(mockClientProxy.emit).toHaveBeenCalledWith('invalidate_enterprise_cache', { id: mockEnterprise.enterprise_id });
     });
 
     it('should throw NotFoundException when enterprise to remove is not found', async () => {

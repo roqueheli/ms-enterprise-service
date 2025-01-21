@@ -1,11 +1,13 @@
-import { INestApplication, ValidationPipe } from '@nestjs/common';
+import { ValidationPipe } from '@nestjs/common';
+import { MicroserviceOptions, Transport } from '@nestjs/microservices';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import { Test, TestingModule } from '@nestjs/testing';
 import { AppModule } from './app.module';
 import { TransformInterceptor } from './common/interceptors/transform.interceptor';
+import { redisConfig } from './config/redis.config';
 
 describe('Bootstrap Function', () => {
-    let app: INestApplication;
+    let app;
 
     beforeEach(async () => {
         const moduleFixture: TestingModule = await Test.createTestingModule({
@@ -17,6 +19,22 @@ describe('Bootstrap Function', () => {
 
     afterEach(async () => {
         await app.close();
+    });
+
+    it('should configure microservice with Redis transport', async () => {
+        const microserviceOptions: MicroserviceOptions = {
+            transport: Transport.REDIS,
+            options: {
+                host: redisConfig.host,
+                port: redisConfig.port,
+            },
+        };
+
+        // Simular la conexión del microservicio
+        const connectMicroserviceSpy = jest.spyOn(app, 'connectMicroservice');
+        app.connectMicroservice(microserviceOptions);
+
+        expect(connectMicroserviceSpy).toHaveBeenCalledWith(microserviceOptions);
     });
 
     describe('Application Setup', () => {

@@ -1,16 +1,20 @@
-import { Body, Controller, Delete, Get, Param, Post, Put, UseGuards } from '@nestjs/common';
+import { Body, Controller, Delete, Get, Inject, Param, Post, Put, UseGuards } from '@nestjs/common';
+import { ClientProxy } from '@nestjs/microservices';
 import { ApiBearerAuth, ApiOperation, ApiParam, ApiResponse, ApiTags } from '@nestjs/swagger';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { CreateEnterpriseDto } from './dto';
 import { EnterprisesService } from './enterprises.service';
 import { Enterprise } from './entities/enterprise.entity';
 
-@ApiTags('Enterprises') // Agrupa los endpoints bajo la categoría "Enterprises" en Swagger
-@ApiBearerAuth() // Indica que los endpoints requieren un token JWT
+@ApiTags('Enterprises')
+@ApiBearerAuth()
 @Controller('enterprises')
-@UseGuards(JwtAuthGuard) // Protege todos los endpoints con JWT
+@UseGuards(JwtAuthGuard)
 export class EnterprisesController {
-    constructor(private readonly enterpriseService: EnterprisesService) { }
+    constructor(
+        private readonly enterpriseService: EnterprisesService,
+        @Inject('ENTERPRISE_SERVICE') private readonly client: ClientProxy,
+    ) { }
 
     @ApiOperation({ summary: 'Crear una nueva empresa' })
     @ApiResponse({
@@ -19,8 +23,17 @@ export class EnterprisesController {
         type: Enterprise,
     })
     @Post()
-    create(@Body() createEnterpriseDto: CreateEnterpriseDto) {
-        return this.enterpriseService.create(createEnterpriseDto);
+    async create(@Body() createEnterpriseDto: CreateEnterpriseDto) {
+        const enterprise = await this.enterpriseService.create(createEnterpriseDto);
+
+        // Emitir evento de empresa creada
+        this.client.emit('enterprise_created', {
+            enterpriseId: enterprise.enterprise_id,
+            name: enterprise.name,
+            // Otros datos relevantes...
+        });
+
+        return enterprise;
     }
 
     @ApiOperation({ summary: 'Obtener todas las empresas' })
@@ -30,8 +43,21 @@ export class EnterprisesController {
         type: [Enterprise],
     })
     @Get()
-    findAll() {
-        return this.enterpriseService.findAll();
+    async findAll() {
+        // Ejemplo de patrón de mensaje/respuesta con Redis
+        const cachedEnterprises = await this.client.send('get_all_enterprises', {}).toPromise()
+            .catch(() => null);
+
+        if (cachedEnterprises) {
+            return cachedEnterprises;
+        }
+
+        const enterprises = await this.enterpriseService.findAll();
+
+        // Almacenar en caché a través de Redis
+        this.client.emit('cache_enterprises', enterprises);
+
+        return enterprises;
     }
 
     @ApiOperation({ summary: 'Obtener una empresa por ID' })
@@ -50,8 +76,26 @@ export class EnterprisesController {
         description: 'Empresa no encontrada.',
     })
     @Get(':id')
-    findOne(@Param('id') id: string) {
-        return this.enterpriseService.findOne(id);
+    async findOne(@Param('id') id: string) {
+        // Intentar obtener de caché primero
+        const cachedEnterprise = await this.client.send('get_enterprise', { id }).toPromise()
+            .catch(() => null);
+
+        if (cachedEnterprise) {
+            return cachedEnterprise;
+        }
+
+        const enterprise = await this.enterpriseService.findOne(id);
+
+        // Almacenar en caché
+        if (enterprise) {
+            this.client.emit('cache_enterprise', {
+                id: enterprise.enterprise_id,
+                data: enterprise,
+            });
+        }
+
+        return enterprise;
     }
 
     @ApiOperation({ summary: 'Actualizar una empresa por ID' })
@@ -70,8 +114,19 @@ export class EnterprisesController {
         description: 'Empresa no encontrada.',
     })
     @Put(':id')
-    update(@Body() createEnterpriseDto: CreateEnterpriseDto) {
-        return this.enterpriseService.create(createEnterpriseDto);
+    async update(@Param('id') id: string, @Body() createEnterpriseDto: CreateEnterpriseDto) {
+        const updatedEnterprise = await this.enterpriseService.create(createEnterpriseDto);
+
+        // Emitir evento de actualización
+        this.client.emit('enterprise_updated', {
+            enterpriseId: id,
+            updates: createEnterpriseDto,
+        });
+
+        // Invalidar caché
+        this.client.emit('invalidate_enterprise_cache', { id });
+
+        return updatedEnterprise;
     }
 
     @ApiOperation({ summary: 'Eliminar una empresa por ID' })
@@ -89,7 +144,15 @@ export class EnterprisesController {
         description: 'Empresa no encontrada.',
     })
     @Delete(':id')
-    remove(@Param('id') id: string) {
-        return this.enterpriseService.remove(id);
+    async remove(@Param('id') id: string) {
+        await this.enterpriseService.remove(id);
+
+        // Emitir evento de eliminación
+        this.client.emit('enterprise_deleted', { enterpriseId: id });
+
+        // Invalidar caché
+        this.client.emit('invalidate_enterprise_cache', { id });
+
+        return { message: 'Enterprise deleted successfully' };
     }
 }
